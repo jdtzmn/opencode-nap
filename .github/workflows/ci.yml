@@ -15,7 +15,9 @@ permissions:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    # ubuntu-26.04 ships uutils coreutils, whose dd alone takes about 7.6 MB
+    # while the window naps, over the 5 MB nap budget the e2e test holds.
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4

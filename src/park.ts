@@ -1,4 +1,5 @@
 import { buildWakeArgs, type Route } from "./argv.js"
+import { dropAddedServer, namesServer, serviceFile } from "./service.js"
 import { buildStubExec } from "./stub.js"
 
 export type Execve = (file: string, argv: string[], env: NodeJS.ProcessEnv) => void
@@ -31,6 +32,10 @@ export interface ParkInput {
   resolveDirectory: (arg: string) => string
   opencodePath: string
   env: NodeJS.ProcessEnv
+  /** The user's home directory, for the default service registration. */
+  home: string
+  /** The version of the server this window is attached to, when known. */
+  serverVersion?: string
   session: (sessionID: string) => SessionFacts
   /** Builds the nap screen the stub prints. */
   card: (session: SessionFacts) => string
@@ -52,7 +57,10 @@ export type ParkResult =
 /** Replaces the process with the nap stub. Returns only when it did not. */
 export function park(input: ParkInput): ParkResult {
   const route = toWakeRoute(input.route)
-  const wake = buildWakeArgs(input.args, route, input.resolveDirectory)
+  // A --server the last wake added is dropped, so this wake reads the
+  // service registration again instead of keeping a URL that may be stale.
+  const started = dropAddedServer(input.args, input.env)
+  const wake = buildWakeArgs(started.args, route, input.resolveDirectory)
   if (!wake.ok) return { status: "skipped", reason: `cannot build the wake command line: ${wake.reason}` }
 
   const session = route.type === "session" ? input.session(route.sessionID) : {}
@@ -64,11 +72,14 @@ export function park(input: ParkInput): ParkResult {
     card: input.card(session),
     wakeOnFocus: input.wakeOnFocus,
     opencodePath: input.opencodePath,
+    service: !namesServer(wake.args) && input.serverVersion
+      ? { file: serviceFile(started.env, input.home), version: input.serverVersion }
+      : undefined,
     args: wake.args,
   })
   input.onExec?.(route)
   try {
-    input.execve(stub.file, stub.argv, { ...input.env, ...extraEnv })
+    input.execve(stub.file, stub.argv, { ...started.env, ...extraEnv })
   } catch (error) {
     return { status: "exec-failed", error }
   }

@@ -113,6 +113,9 @@ export function startNap(context: unknown, rawOptions: unknown, log: Log, proc: 
 
   let idle: IdleSource | undefined
   let focus: FocusSource | undefined
+  // Read with the server pid. A wake attaches to the registered service only
+  // when its version matches, so another channel's or release's registration is skipped.
+  let serverVersion: string | undefined
 
   const decideNow = () => {
     if (!idle || !focus) throw new Error("sources are not running")
@@ -136,6 +139,8 @@ export function startNap(context: unknown, rawOptions: unknown, log: Log, proc: 
         resolveDirectory,
         opencodePath: proc.execPath,
         env: proc.env(),
+        home: proc.home,
+        serverVersion,
         session: sessionID => {
           const session = host.data.session.get(sessionID)
           return { title: session?.title, directory: session?.location?.directory }
@@ -211,6 +216,8 @@ export function startNap(context: unknown, rawOptions: unknown, log: Log, proc: 
       const info: unknown = await host.client.server.info()
       const pid = isRecord(info) ? info.pid : undefined
       serverPid = typeof pid === "number" && Number.isInteger(pid) ? pid : undefined
+      const version = isRecord(info) ? info.version : undefined
+      serverVersion = typeof version === "string" && version !== "" ? version : undefined
     } catch {
       // An unknown server pid is refused below.
     }

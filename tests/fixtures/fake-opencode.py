@@ -3,7 +3,8 @@
 Switches the terminal to raw mode, prints @@READY@@, then reads its input
 until it sees the probe byte "Z" (or 3 s pass) and prints
 @@RESULT@@<json>@@END@@ with its arguments, every input byte it got (as
-latin-1 text), and whether the NAP_TEST_MARK sentinel was preserved.
+latin-1 text), whether the NAP_TEST_MARK sentinel was preserved, and the
+service password and URL the stub set, if any.
 """
 
 import json
@@ -30,5 +31,7 @@ result = {
     "argv": sys.argv[1:],
     "stdin": got.decode("latin1"),
     "markKept": os.environ.get("NAP_TEST_MARK") == "nap-test-mark",
+    "password": os.environ.get("OPENCODE_PASSWORD"),
+    "napServer": os.environ.get("OPENCODE_NAP_SERVER"),
 }
 os.write(1, b"@@RESULT@@" + json.dumps(result).encode() + b"@@END@@")
