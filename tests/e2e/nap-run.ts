@@ -123,14 +123,16 @@ export class NapRun {
   }
 
   /** Waits for the next nap card and for the process to have become the stub. */
-  async waitForNap(timeoutMs: number): Promise<{ at: number; rssKiB: number; count: number }> {
+  async waitForNap(timeoutMs: number): Promise<{ at: number; rssKiB: number; count: number; members: string }> {
     const card = await waitUntil(() => (this.cards() > this.cardsSeen ? Date.now() : undefined), timeoutMs, "the nap card")
     const tree = await waitUntil(async () => {
       const found = await processTree(this.pid)
       return isStub(found.leader) && found.count >= 2 ? found : undefined
     }, 5_000, "the stub and its reader")
     this.cardsSeen = this.cards()
-    return { at: card, rssKiB: tree.rssKiB, count: tree.count }
+    // Named in a memory assertion's message, so a failure shows what was measured.
+    const members = tree.members.map(member => `${member.pid} ${member.ppid} ${member.rss} KiB ${member.args.slice(0, 100)}`).join("\n")
+    return { at: card, rssKiB: tree.rssKiB, count: tree.count, members }
   }
 
   /** Types a draft into the awake prompt, one character at a time. */

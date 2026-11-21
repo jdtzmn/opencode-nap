@@ -52,7 +52,7 @@ describe.skipIf(!e2eEnabled)(`OpenCode ${cliVersion}: core nap and wake in a rea
 
     const napped = await run.waitForNap(NAP_TIMEOUT_MS)
     expect(napped.at - watchingAt, await run.context()).toBeLessThan(IDLE_MS + NAP_SLACK_MS)
-    expect(napped.rssKiB, await run.context()).toBeLessThan(5 * 1024)
+    expect(napped.rssKiB, `${napped.members}\n${await run.context()}`).toBeLessThan(5 * 1024)
 
     const offset = tui.output().length
     const spaceAt = await run.wake(SPACE)
