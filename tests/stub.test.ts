@@ -40,7 +40,7 @@ const RESET_SEQUENCES = [
 const resumeCommand = (opencodePath: string, args: string[]): string =>
   [opencodePath, ...args].map(word => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(word) ? word : `'${word.replace(/'/g, "'\\''")}'`)).join(" ")
 
-interface Step { expect?: string; send?: string; sleep?: number }
+interface Step { expect?: string; send?: string; sleep?: number; run?: () => void }
 interface FakeResult { argv: string[]; stdin: string; markKept: boolean; password: string | null; napServer: string | null }
 interface Run { output: string; status: number | null; timedOut: boolean; fake?: FakeResult }
 
@@ -101,6 +101,7 @@ async function runStub(
   try {
     let seen = 0
     for (const step of steps) {
+      step.run?.()
       if (step.send !== undefined) pty.write(step.send)
       if (step.sleep !== undefined) await sleep(step.sleep)
       if (step.expect === undefined) continue
@@ -331,17 +332,18 @@ describe("waking into the background service", () => {
     }
   }
 
-  /** A stand-in service whose nth /api/info answer waits delays[n] ms. */
-  function fakeService(delays: number[] = []) {
+  /** A stand-in service whose nth /api/info answer waits answers[n].delay ms and has answers[n].status. */
+  function fakeService(answers: Array<{ delay?: number; status?: number }> = []) {
     const requests: number[] = []
     const server = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
-      idleTimeout: 30,
+      idleTimeout: 0,
       async fetch(request) {
-        const delay = delays[requests.push(Date.now()) - 1] ?? 0
+        const { delay = 0, status = 200 } = answers[requests.push(Date.now()) - 1] ?? {}
         if (delay) await Bun.sleep(delay)
         if (request.headers.get("authorization") !== `Basic ${btoa(`opencode:${password}`)}`) return new Response("", { status: 401 })
+        if (status !== 200) return new Response("", { status })
         return Response.json({ version: VERSION, pid: live.pid })
       },
     })
@@ -359,6 +361,7 @@ describe("waking into the background service", () => {
 
   // Each run gets more room than the terminal tests: it also starts curl and a server request.
   const RUN_MS = 12_000
+  const WAITING = "Waiting for the OpenCode service at"
   const TEST_MS = 30_000
 
   const wakeInto = (file: string, extra: { env?: Record<string, string>; version?: string } = {}, timeoutMs = RUN_MS) =>
@@ -411,13 +414,25 @@ describe("waking into the background service", () => {
     }
   }, TEST_MS)
 
+  it("ac-service-busy: a service that is still starting (HTTP 503) is waited for, then attached to", async () => {
+    const service = fakeService([{ status: 503 }])
+    try {
+      const run = await wakeInto(register(entry(service.url)))
+      expect(run.output).toContain(WAITING)
+      expect(run.fake?.argv).toEqual(["--server", service.url, ...ARGS])
+      expect(service.requests).toHaveLength(2)
+    } finally {
+      service.stop()
+    }
+  }, TEST_MS)
+
   it("ac-service-busy: a wake against a slow service waits for it and never falls back to the plain start", async () => {
     // The first answer comes after curl's 4 s limit, the second in time.
-    const service = fakeService([5_000, 1_500])
+    const service = fakeService([{ delay: 5_000 }, { delay: 1_500 }])
     try {
       const run = await wakeInto(register(entry(service.url)), {}, 25_000)
       expect(run.timedOut).toBe(false)
-      expect(run.output).toContain(`Waiting for the OpenCode service at ${service.url} to answer...`)
+      expect(run.output).toContain(`Waiting for the OpenCode service at ${service.url} to answer.`)
       expect(run.output.split("@@READY@@")).toHaveLength(2)
       expect(run.fake?.argv).toEqual(["--server", service.url, ...ARGS])
       expect(service.requests).toHaveLength(2)
@@ -482,20 +497,76 @@ describe("waking into the background service", () => {
 
     const unreadable: Array<[string, Record<string, unknown>]> = [
       ["an escaped password", { password: 'has"quote' }],
-      ["a pid that is not a number", { pid: "123" }],
+      // The live pid itself, so only the quoting can refuse it.
+      ["a pid written as a string", { pid: "LIVE" }],
       ["a URL that is not HTTP", { url: "file:///etc/passwd" }],
     ]
     for (const [name, bad] of unreadable) {
       it(`values it cannot read safely: ${name}`, async () => {
         const service = fakeService()
         try {
-          expectPlain(await wakeInto(register(entry(service.url, bad))))
+          expectPlain(await wakeInto(register(entry(service.url, bad.pid === "LIVE" ? { pid: String(live.pid) } : bad))))
           expect(service.requests).toHaveLength(0)
         } finally {
           service.stop()
         }
       }, TEST_MS)
     }
+
+    it("a registration it cannot read", async () => {
+      const service = fakeService()
+      try {
+        const file = register(entry(service.url))
+        chmodSync(file, 0o000)
+        expectPlain(await wakeInto(file))
+        expect(service.requests).toHaveLength(0)
+      } finally {
+        service.stop()
+      }
+    }, TEST_MS)
+
+    it("a service that has failed (HTTP 500)", async () => {
+      const service = fakeService([{ status: 500 }])
+      try {
+        expectPlain(await wakeInto(register(entry(service.url))))
+        expect(service.requests).toHaveLength(1)
+      } finally {
+        service.stop()
+      }
+    }, TEST_MS)
+
+    it("a service whose process ends while the wake waits for it", async () => {
+      const doomed = Bun.spawn(["sleep", "300"])
+      const service = fakeService([{ delay: 60_000 }, { delay: 60_000 }])
+      try {
+        const file = register(entry(service.url, { pid: doomed.pid }))
+        expectPlain(await runStub(
+          { args: ARGS, service: { file, version: VERSION }, env: { PATH: `${bin}:${process.env.PATH}` } },
+          [{ expect: ARMED }, { send: SPACE }, { expect: WAITING }, { run: () => doomed.kill("SIGKILL") }, { expect: "@@READY@@" }, { send: PROBE }],
+          25_000,
+        ))
+      } finally {
+        doomed.kill("SIGKILL")
+        service.stop()
+      }
+    }, 40_000)
+
+    it("Ctrl-C while it waits for a service that never answers", async () => {
+      const service = fakeService([{ delay: 60_000 }, { delay: 60_000 }])
+      try {
+        const file = register(entry(service.url))
+        const run = await runStub(
+          { args: ARGS, service: { file, version: VERSION }, env: { PATH: `${bin}:${process.env.PATH}` } },
+          [{ expect: ARMED }, { send: SPACE }, { expect: WAITING }, { send: "\x03" }, { expect: "@@READY@@" }, { send: PROBE }],
+          20_000,
+        )
+        expect(run.output).toContain("Ctrl-C stops waiting and starts OpenCode the usual way")
+        expectPlain(run)
+        expect(alive(live.pid)).toBe(true)
+      } finally {
+        service.stop()
+      }
+    }, 40_000)
 
     it("a registration that is not JSON", async () => {
       const file = join(dir, "not-json.json")

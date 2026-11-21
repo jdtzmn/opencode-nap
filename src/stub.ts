@@ -43,12 +43,18 @@ export interface StubExec {
 // service registered and running connects to it with --server instead, which
 // never replaces it. `field` reads the registration, written by
 // JSON.stringify on one line, with shell patterns: no parser is needed, and a
-// value with an escape in it is refused rather than guessed at. Until the
-// service answers, curl waits for it, so the TUI's own short check succeeds;
-// its password reaches curl on stdin and OpenCode in the environment, never in
-// an argument. A registration that is missing, stale, for another version, or
-// a service that answers with an error falls back to the plain start, which
-// starts or repairs the service as before.
+// value with an escape in it is refused rather than guessed at. The version
+// must be the one the window napped from, so a registration left by another
+// channel or release is not taken for this window's service.
+//
+// While the service is busy, curl waits for it, so the TUI's own short check
+// succeeds; its password reaches curl on stdin (`-q` keeps ~/.curlrc out of
+// it) and OpenCode in the environment, never in an argument. The wait has no
+// limit, because giving up would be the restart this avoids; Ctrl-C ends it
+// and starts the usual way. A registration that is missing, stale, for
+// another version, or a service that refuses, has failed or is not
+// listening, falls back to the plain start, which starts or repairs the
+// service as before.
 const WAIT_SCRIPT = `
 wake=$1 opencode=$2 service=$3 version=$4
 shift 4
@@ -70,22 +76,38 @@ while IFS= read -r drained; do :; done
 printf '\\033[0m\\033[?25h\\033[2J\\033[H'
 stty sane 2>/dev/null
 field() {
+  quoted=
   case $json in *"\\"$1\\":"*) ;; *) return 1 ;; esac
   value=\${json#*"\\"$1\\":"}
   case $value in
-    \\"*) value=\${value#\\"}; value=\${value%%\\"*} ;;
+    \\"*) quoted=1; value=\${value#\\"}; value=\${value%%\\"*} ;;
     *) value=\${value%%[!0-9]*} ;;
   esac
   case $value in '' | *\\\\*) return 1 ;; esac
+}
+# One request: 0 when the service answers, 2 while it is busy or starting,
+# 1 when it refuses, has failed or is not there.
+ask() {
+  code=$(printf 'user = "opencode:%s"\\n' "$password" | curl -q -s --noproxy '*' -o /dev/null -w '%{http_code}' -m 4 -K - "$url/api/info")
+  case $? in
+    0) ;;
+    28 | 52 | 56) return 2 ;;
+    *) return 1 ;;
+  esac
+  case $code in
+    2??) return 0 ;;
+    500) return 1 ;;
+    5??) return 2 ;;
+    *) return 1 ;;
+  esac
 }
 attach() {
   [ -n "$service" ] && [ -n "$version" ] && [ -r "$service" ] || return 1
   json=
   while IFS= read -r line || [ -n "$line" ]; do json=$json$line; done < "$service" || return 1
   field version && [ "$value" = "$version" ] || return 1
-  field pid || return 1
+  field pid && [ -z "$quoted" ] || return 1
   pid=$value
-  case $pid in *[!0-9]*) return 1 ;; esac
   field url || return 1
   url=$value
   case $url in http://* | https://*) ;; *) return 1 ;; esac
@@ -93,18 +115,19 @@ attach() {
   password=$value
   kill -0 "$pid" 2>/dev/null || return 1
   if command -v curl >/dev/null 2>&1; then
-    waiting=
+    stop= waiting=
+    trap 'stop=1' INT
     while :; do
-      printf 'user = "opencode:%s"\\n' "$password" | curl -sf -o /dev/null -m 4 -K - "$url/api/info"
+      ask
       case $? in
         0) break ;;
-        28) ;;
-        *) return 1 ;;
+        1) trap - INT; return 1 ;;
       esac
-      kill -0 "$pid" 2>/dev/null || return 1
-      [ -n "$waiting" ] || printf 'Waiting for the OpenCode service at %s to answer...\\n' "$url"
+      if [ -n "$stop" ] || ! kill -0 "$pid" 2>/dev/null; then trap - INT; return 1; fi
+      [ -n "$waiting" ] || printf 'Waiting for the OpenCode service at %s to answer.\\nCtrl-C stops waiting and starts OpenCode the usual way, which restarts a service that does not answer.\\n' "$url"
       waiting=1
     done
+    trap - INT
   fi
   OPENCODE_PASSWORD=$password OPENCODE_NAP_SERVER=$url
   export OPENCODE_PASSWORD OPENCODE_NAP_SERVER

@@ -3,7 +3,9 @@ import { join } from "node:path"
 /**
  * Set by the stub when it woke OpenCode with `--server <url>` for the
  * background service, to that URL. The next nap uses it to tell that
- * `--server` apart from one the user passed.
+ * `--server` apart from one the user passed. OpenCode strips its password
+ * variables from child processes but not this one; a nested OpenCode that
+ * inherits it at worst re-reads the registration at its next nap.
  */
 export const NAP_SERVER_ENV = "OPENCODE_NAP_SERVER"
 const PASSWORD_ENV = "OPENCODE_PASSWORD"

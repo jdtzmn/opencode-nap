@@ -113,7 +113,8 @@ export function startNap(context: unknown, rawOptions: unknown, log: Log, proc: 
 
   let idle: IdleSource | undefined
   let focus: FocusSource | undefined
-  // Read with the server pid; a wake uses it to tell the service registration is this window's service.
+  // Read with the server pid. A wake attaches to the registered service only
+  // when its version matches, so another channel's or release's registration is skipped.
   let serverVersion: string | undefined
 
   const decideNow = () => {
