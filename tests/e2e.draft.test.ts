@@ -49,12 +49,25 @@ async function openSession(name: string, options: Record<string, unknown> = {}) 
   return { sessionID, tui, run, watch }
 }
 
-/** Waits until the observer's report on the prompt passes `check`. */
-const promptWhere = (watch: Watch, check: (prompt: Entry) => boolean, timeoutMs: number): Promise<Entry> =>
-  waitUntil(async () => {
-    const { result } = await watch.ask("prompt")
-    return check(result) ? result : undefined
-  }, timeoutMs, "the prompt to match")
+/**
+ * Waits until the observer's report on the prompt passes `check`. A slow
+ * report, as from a TUI still starting after wake, is retried until the
+ * deadline rather than failing at the first ask's own limit.
+ */
+const promptWhere = (watch: Watch, check: (prompt: Entry) => boolean, timeoutMs: number): Promise<Entry> => {
+  const deadline = Date.now() + timeoutMs
+  let last = ""
+  return waitUntil(async () => {
+    const remaining = Math.max(1_000, Math.min(10_000, deadline - Date.now()))
+    const report = await watch.ask("prompt", "", remaining).catch((error: Error) => {
+      last = error.message
+      return undefined
+    })
+    if (!report) return undefined
+    last = JSON.stringify(report.result)
+    return check(report.result) ? report.result : undefined
+  }, timeoutMs, "the prompt to match", () => last)
+}
 
 /** Waits for the nap, notes the draft files while napped, and wakes with Space. */
 async function napAndWake(run: NapRun) {

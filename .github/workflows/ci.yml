@@ -88,6 +88,9 @@ jobs:
         run: npm pack --dry-run
 
       - name: Test packed package in OpenCode 2
+        # The 3-vCPU macOS runner times out prompts with eight jobs at once.
+        env:
+          NAP_E2E_JOBS: "4"
         run: npm run test:e2e
 
   verify-windows:
