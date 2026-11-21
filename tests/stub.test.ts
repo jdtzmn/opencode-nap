@@ -499,6 +499,7 @@ describe("waking into the background service", () => {
       ["an escaped password", { password: 'has"quote' }],
       // The live pid itself, so only the quoting can refuse it.
       ["a pid written as a string", { pid: "LIVE" }],
+      ["pid 0, which kill -0 would take for the stub's own group", { pid: 0 }],
       ["a URL that is not HTTP", { url: "file:///etc/passwd" }],
     ]
     for (const [name, bad] of unreadable) {

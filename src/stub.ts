@@ -108,6 +108,8 @@ attach() {
   field version && [ "$value" = "$version" ] || return 1
   field pid && [ -z "$quoted" ] || return 1
   pid=$value
+  # kill -0 0 would test the stub's own process group.
+  case $pid in 0 | 1) return 1 ;; esac
   field url || return 1
   url=$value
   case $url in http://* | https://*) ;; *) return 1 ;; esac
