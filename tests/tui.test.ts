@@ -64,7 +64,7 @@ describe("startNap", () => {
     const { fake } = await start({ edit: context => { context.route = { type: "home" } } })
     await fake.advance(IDLE_MS + 5_000)
     const [card, ...rest] = fake.execs[0].argv.slice(4)
-    expect(rest).toEqual(["keys", "/opt/opencode/bin/opencode", "--server", SERVER_URL])
+    expect(rest).toEqual(["keys", "/opt/opencode/bin/opencode", "", "", "--server", SERVER_URL])
     expect(withoutSequences(card)).toContain("Press any key or click to wake.")
     expect(withoutSequences(card)).toContain("/work/project")
   })
@@ -147,10 +147,18 @@ describe("startNap", () => {
     }
   })
 
+  it("ac-service-attach: a window on the background service naps with its registration and server version", async () => {
+    const { fake } = await start({ args: ["-s", SESSION_ID] })
+    await fake.advance(IDLE_MS + 5_000)
+    expect(fake.execs[0].argv.slice(5)).toEqual([
+      "keys", "/opt/opencode/bin/opencode", "/home/shane/.local/state/opencode/service.json", "2.2.4", "-s", SESSION_ID,
+    ])
+  })
+
   it("makes a relative directory argument absolute", async () => {
     const { fake } = await start({ args: ["--server", SERVER_URL, "project"] })
     await fake.advance(IDLE_MS + 5_000)
-    expect(fake.execs[0].argv.slice(7)).toEqual(["--server", SERVER_URL, "/work/project", "-s", SESSION_ID])
+    expect(fake.execs[0].argv.slice(9)).toEqual(["--server", SERVER_URL, "/work/project", "-s", SESSION_ID])
   })
 
   it("ac-exec-fails: an execve that throws turns the plugin off without a retry", async () => {

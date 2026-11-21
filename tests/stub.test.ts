@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from "bun:test"
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { STUB_SCRIPT, buildStubExec } from "../src/stub.js"
@@ -41,7 +41,7 @@ const resumeCommand = (opencodePath: string, args: string[]): string =>
   [opencodePath, ...args].map(word => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(word) ? word : `'${word.replace(/'/g, "'\\''")}'`)).join(" ")
 
 interface Step { expect?: string; send?: string; sleep?: number }
-interface FakeResult { argv: string[]; stdin: string; markKept: boolean }
+interface FakeResult { argv: string[]; stdin: string; markKept: boolean; password: string | null; napServer: string | null }
 interface Run { output: string; status: number | null; timedOut: boolean; fake?: FakeResult }
 
 // Above a run's own 6 s limit, so a hung stub is killed and reported.
@@ -72,7 +72,14 @@ const sleep = (ms: number) => new Promise(done => setTimeout(done, ms))
  * has not exited within `timeoutMs` is stopped and reported as timed out.
  */
 async function runStub(
-  input: { card?: string; wakeOnFocus?: boolean; opencodePath?: string; args?: string[] },
+  input: {
+    card?: string
+    wakeOnFocus?: boolean
+    opencodePath?: string
+    service?: { file: string; version: string }
+    env?: Record<string, string>
+    args?: string[]
+  },
   steps: Step[],
   timeoutMs = 6_000,
 ): Promise<Run> {
@@ -80,11 +87,12 @@ async function runStub(
     card: input.card ?? CARD,
     wakeOnFocus: input.wakeOnFocus ?? false,
     opencodePath: input.opencodePath ?? opencode,
+    service: input.service,
     args: input.args ?? [],
   })
   const pty = await startPty({
     command: [exec.file, ...exec.argv.slice(1)],
-    env: { ...process.env, NAP_TEST_MARK: MARK } as Record<string, string>,
+    env: { ...process.env, NAP_TEST_MARK: MARK, ...input.env } as Record<string, string>,
     cwd: dir,
     outputFile: join(dir, `run-${++runs}.out`),
   })
@@ -132,7 +140,7 @@ describe("buildStubExec", () => {
 
     expect(exec.file).toBe("/bin/sh")
     expect(exec.argv).toEqual([
-      "sh", "-c", STUB_SCRIPT, "sh", "My session", "focus", "/opt/opencode", "-s", "ses_1", "$(touch x)",
+      "sh", "-c", STUB_SCRIPT, "sh", "My session", "focus", "/opt/opencode", "", "", "-s", "ses_1", "$(touch x)",
     ])
     expect(STUB_SCRIPT).not.toContain("My session")
   })
@@ -285,5 +293,202 @@ describe("stub under a terminal", () => {
       expect(run.status).toBe(1)
       expect(run.output).toContain(`To resume, run:\r\n  ${resumeCommand(path, [])}\r\n`)
     }
+  })
+})
+
+describe("waking into the background service", () => {
+  const VERSION = "9.9.9-test"
+  const ARGS = ["-s", "ses_svc"]
+  let password: string
+  let bin: string
+  let curlLog: string
+  let live: ReturnType<typeof Bun.spawn>
+  let files = 0
+
+  beforeAll(() => {
+    password = `pw-${crypto.randomUUID()}`
+    bin = join(dir, "bin")
+    curlLog = join(dir, "curl-argv.log")
+    const curl = Bun.which("curl")
+    if (!curl) throw new Error("curl is required for the service wake tests")
+    mkdirSync(bin, { recursive: true })
+    // Records curl's arguments, so a test can show the password is not among them.
+    writeFileSync(join(bin, "curl"), `#!/bin/sh\nfor arg in "$@"; do printf '%s\\n' "$arg"; done >> '${curlLog}'\nexec '${curl}' "$@"\n`)
+    chmodSync(join(bin, "curl"), 0o755)
+    live = Bun.spawn(["sleep", "300"])
+  })
+
+  afterAll(() => {
+    live.kill("SIGKILL")
+  })
+
+  const alive = (pid: number): boolean => {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /** A stand-in service whose nth /api/info answer waits delays[n] ms. */
+  function fakeService(delays: number[] = []) {
+    const requests: number[] = []
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      idleTimeout: 30,
+      async fetch(request) {
+        const delay = delays[requests.push(Date.now()) - 1] ?? 0
+        if (delay) await Bun.sleep(delay)
+        if (request.headers.get("authorization") !== `Basic ${btoa(`opencode:${password}`)}`) return new Response("", { status: 401 })
+        return Response.json({ version: VERSION, pid: live.pid })
+      },
+    })
+    return { url: `http://127.0.0.1:${server.port}`, requests, stop: () => server.stop(true) }
+  }
+
+  function register(entry: Record<string, unknown>): string {
+    const file = join(dir, `service-${++files}.json`)
+    writeFileSync(file, JSON.stringify(entry))
+    return file
+  }
+
+  const entry = (url: string, overrides: Record<string, unknown> = {}) =>
+    ({ id: "svc", version: VERSION, url, pid: live.pid, password, ...overrides })
+
+  const wakeInto = (file: string, extra: { env?: Record<string, string>; version?: string } = {}, timeoutMs?: number) =>
+    runStub(
+      { args: ARGS, service: { file, version: extra.version ?? VERSION }, env: { PATH: `${bin}:${process.env.PATH}`, ...extra.env } },
+      wakeSteps([{ send: SPACE }]),
+      timeoutMs,
+    )
+
+  const curlArgs = (): string => {
+    try {
+      return readFileSync(curlLog, "utf8")
+    } catch {
+      return ""
+    }
+  }
+
+  it("ac-service-attach: a running service gets --server, with its password only in the environment", async () => {
+    const service = fakeService()
+    try {
+      const run = await wakeInto(register(entry(service.url)))
+      expect(run.status).toBe(0)
+      expect(run.fake?.argv).toEqual(["--server", service.url, ...ARGS])
+      expect(run.fake?.password).toBe(password)
+      expect(run.fake?.napServer).toBe(service.url)
+      expect(run.fake?.argv.join("\n")).not.toContain(password)
+      expect(service.requests).toHaveLength(1)
+      expect(curlArgs()).toContain(`${service.url}/api/info`)
+      expect(curlArgs()).not.toContain(password)
+    } finally {
+      service.stop()
+    }
+  })
+
+  it("ac-service-attach: without curl it still wakes with --server, unchecked", async () => {
+    const tools = join(dir, "tools")
+    mkdirSync(tools, { recursive: true })
+    for (const tool of ["stty", "dd"]) {
+      const path = Bun.which(tool)
+      if (!path) throw new Error(`${tool} is required`)
+      if (!Bun.which(tool, { PATH: tools })) symlinkSync(path, join(tools, tool))
+    }
+    const service = fakeService()
+    try {
+      const run = await wakeInto(register(entry(service.url)), { env: { PATH: tools } })
+      expect(run.fake?.argv).toEqual(["--server", service.url, ...ARGS])
+      expect(service.requests).toHaveLength(0)
+    } finally {
+      service.stop()
+    }
+  })
+
+  it("ac-service-busy: a wake against a slow service waits for it and never falls back to the plain start", async () => {
+    // The first answer comes after curl's 4 s limit, the second in time.
+    const service = fakeService([5_000, 1_500])
+    try {
+      const run = await wakeInto(register(entry(service.url)), {}, 20_000)
+      expect(run.timedOut).toBe(false)
+      expect(run.output).toContain(`Waiting for the OpenCode service at ${service.url} to answer...`)
+      expect(run.output.split("@@READY@@")).toHaveLength(2)
+      expect(run.fake?.argv).toEqual(["--server", service.url, ...ARGS])
+      expect(service.requests).toHaveLength(2)
+      expect(alive(live.pid)).toBe(true)
+    } finally {
+      service.stop()
+    }
+  }, 30_000)
+
+  describe("ac-service-fallback: anything but a running, matching service gets the plain start", () => {
+    const expectPlain = (run: Run) => {
+      expect(run.status).toBe(0)
+      expect(run.fake?.argv).toEqual(ARGS)
+      expect(run.fake?.password).toBeNull()
+      expect(run.fake?.napServer).toBeNull()
+    }
+
+    it("a missing registration", async () => {
+      expectPlain(await wakeInto(join(dir, "no-such-service.json")))
+    })
+
+    it("no registration given, as for a window that names its own server", async () => {
+      expectPlain(await runStub({ args: ARGS }, wakeSteps([{ send: SPACE }])))
+    })
+
+    it("a registration whose pid is gone", async () => {
+      const gone = Bun.spawn(["true"])
+      await gone.exited
+      const service = fakeService()
+      try {
+        expectPlain(await wakeInto(register(entry(service.url, { pid: gone.pid }))))
+        expect(service.requests).toHaveLength(0)
+      } finally {
+        service.stop()
+      }
+    })
+
+    it("a service of another version", async () => {
+      const service = fakeService()
+      try {
+        expectPlain(await wakeInto(register(entry(service.url)), { version: "1.0.0" }))
+      } finally {
+        service.stop()
+      }
+    })
+
+    it("a service that rejects the password", async () => {
+      const service = fakeService()
+      try {
+        expectPlain(await wakeInto(register(entry(service.url, { password: "wrong" }))))
+        expect(service.requests).toHaveLength(1)
+      } finally {
+        service.stop()
+      }
+    })
+
+    it("nothing listening at the registered URL", async () => {
+      const service = fakeService()
+      service.stop()
+      expectPlain(await wakeInto(register(entry(service.url))))
+    })
+
+    it("values it cannot read safely", async () => {
+      const service = fakeService()
+      try {
+        for (const bad of [{ password: 'has"quote' }, { pid: "123" }, { url: "file:///etc/passwd" }]) {
+          expectPlain(await wakeInto(register(entry(service.url, bad))))
+        }
+        expect(service.requests).toHaveLength(0)
+        const file = join(dir, "not-json.json")
+        writeFileSync(file, "garbage")
+        expectPlain(await wakeInto(file))
+      } finally {
+        service.stop()
+      }
+    })
   })
 })

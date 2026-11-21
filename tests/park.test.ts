@@ -26,6 +26,8 @@ describe("park", () => {
       resolveDirectory: arg => `/abs/${arg}`,
       opencodePath: "/bin/opencode",
       env: { PATH: "/usr/bin" },
+      home: "/home/me",
+      serverVersion: "2.2.7",
       session: () => ({ title: "Title", directory: "/work/project" }),
       card: session => `card for ${String(session.title)} in ${String(session.directory)}`,
       wakeOnFocus: false,
@@ -94,5 +96,33 @@ describe("park", () => {
 
   it("reports an execve that returns as a failure", () => {
     expect(park(input({ execve: () => {} }))).toEqual({ status: "exec-failed", error: new Error("execve returned") })
+  })
+
+  const stubArgs = (parkInput: ReturnType<typeof input>) => (parkInput.calls[0][1] as string[]).slice(5)
+
+  it("ac-service-attach: a window on the background service gives the stub its registration and version", () => {
+    const parkInput = input({ args: ["project"] })
+    park(parkInput)
+    expect(stubArgs(parkInput)).toEqual(["keys", "/bin/opencode", "/home/me/.local/state/opencode/service.json", "2.2.7", "/abs/project", "-s", "ses_a"])
+  })
+
+  it("ac-service-attach: a window that names its server, or whose server version is unknown, gets none", () => {
+    const named = input()
+    park(named)
+    expect(stubArgs(named).slice(2, 4)).toEqual(["", ""])
+    const unknown = input({ args: [], serverVersion: undefined })
+    park(unknown)
+    expect(stubArgs(unknown).slice(2, 4)).toEqual(["", ""])
+  })
+
+  it("ac-service-attach: the --server an earlier wake added is dropped, with its password and marker", () => {
+    const url = "http://127.0.0.1:49374"
+    const parkInput = input({
+      args: ["--server", url, "-s", "ses_old", "project"],
+      env: { PATH: "/usr/bin", XDG_STATE_HOME: "/state", OPENCODE_PASSWORD: "pw", OPENCODE_NAP_SERVER: url },
+    })
+    park(parkInput)
+    expect(stubArgs(parkInput)).toEqual(["keys", "/bin/opencode", "/state/opencode/service.json", "2.2.7", "/abs/project", "-s", "ses_a"])
+    expect(parkInput.calls[0][2]).toEqual({ PATH: "/usr/bin", XDG_STATE_HOME: "/state" })
   })
 })

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
-import { readdirSync, readlinkSync } from "fs"
+import { readdirSync, readFileSync, readlinkSync } from "fs"
+import { join } from "path"
 import { cleanup, cliVersion, createScratch, e2eEnabled, startCommand, type Scratch } from "./e2e/harness.js"
 import { NapRun, SPACE, waitUntil, Watch } from "./e2e/nap-run.js"
 import { processTree } from "./e2e/processes.js"
@@ -126,7 +127,10 @@ describe.skipIf(!runnable)(`OpenCode ${cliVersion}: the default service, in a pr
       const spaceAt = await run.wake(SPACE)
       await run.waitForInteractive(spaceAt)
       await run.waitForWatching(2)
-      expect((await watch.ask("state")).result.argv, await run.context()).toEqual([scratch.project])
+      // The wake attaches to the registered service with --server, so a busy
+      // service is never replaced by the woken window.
+      const registration = JSON.parse(readFileSync(join(scratch.env.XDG_STATE_HOME, "opencode", "service.json"), "utf8"))
+      expect((await watch.ask("state")).result.argv, await run.context()).toEqual(["--server", registration.url, scratch.project])
       const after = (await watch.napEntries()).filter(entry => entry.message === "watching")[1]?.detail?.serverPid
       expect(after, "the woken TUI reached the same service").toBe(before)
       console.log(`default service: napped and woke inside ${isolation.name} (${namespace}); service pid ${before}`)
