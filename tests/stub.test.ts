@@ -357,7 +357,11 @@ describe("waking into the background service", () => {
   const entry = (url: string, overrides: Record<string, unknown> = {}) =>
     ({ id: "svc", version: VERSION, url, pid: live.pid, password, ...overrides })
 
-  const wakeInto = (file: string, extra: { env?: Record<string, string>; version?: string } = {}, timeoutMs?: number) =>
+  // Each run gets more room than the terminal tests: it also starts curl and a server request.
+  const RUN_MS = 12_000
+  const TEST_MS = 30_000
+
+  const wakeInto = (file: string, extra: { env?: Record<string, string>; version?: string } = {}, timeoutMs = RUN_MS) =>
     runStub(
       { args: ARGS, service: { file, version: extra.version ?? VERSION }, env: { PATH: `${bin}:${process.env.PATH}`, ...extra.env } },
       wakeSteps([{ send: SPACE }]),
@@ -387,7 +391,7 @@ describe("waking into the background service", () => {
     } finally {
       service.stop()
     }
-  })
+  }, TEST_MS)
 
   it("ac-service-attach: without curl it still wakes with --server, unchecked", async () => {
     const tools = join(dir, "tools")
@@ -405,13 +409,13 @@ describe("waking into the background service", () => {
     } finally {
       service.stop()
     }
-  })
+  }, TEST_MS)
 
   it("ac-service-busy: a wake against a slow service waits for it and never falls back to the plain start", async () => {
     // The first answer comes after curl's 4 s limit, the second in time.
     const service = fakeService([5_000, 1_500])
     try {
-      const run = await wakeInto(register(entry(service.url)), {}, 20_000)
+      const run = await wakeInto(register(entry(service.url)), {}, 25_000)
       expect(run.timedOut).toBe(false)
       expect(run.output).toContain(`Waiting for the OpenCode service at ${service.url} to answer...`)
       expect(run.output.split("@@READY@@")).toHaveLength(2)
@@ -421,7 +425,7 @@ describe("waking into the background service", () => {
     } finally {
       service.stop()
     }
-  }, 30_000)
+  }, 40_000)
 
   describe("ac-service-fallback: anything but a running, matching service gets the plain start", () => {
     const expectPlain = (run: Run) => {
@@ -433,11 +437,11 @@ describe("waking into the background service", () => {
 
     it("a missing registration", async () => {
       expectPlain(await wakeInto(join(dir, "no-such-service.json")))
-    })
+    }, TEST_MS)
 
     it("no registration given, as for a window that names its own server", async () => {
-      expectPlain(await runStub({ args: ARGS }, wakeSteps([{ send: SPACE }])))
-    })
+      expectPlain(await runStub({ args: ARGS }, wakeSteps([{ send: SPACE }]), RUN_MS))
+    }, TEST_MS)
 
     it("a registration whose pid is gone", async () => {
       const gone = Bun.spawn(["true"])
@@ -449,7 +453,7 @@ describe("waking into the background service", () => {
       } finally {
         service.stop()
       }
-    })
+    }, TEST_MS)
 
     it("a service of another version", async () => {
       const service = fakeService()
@@ -458,7 +462,7 @@ describe("waking into the background service", () => {
       } finally {
         service.stop()
       }
-    })
+    }, TEST_MS)
 
     it("a service that rejects the password", async () => {
       const service = fakeService()
@@ -468,27 +472,35 @@ describe("waking into the background service", () => {
       } finally {
         service.stop()
       }
-    })
+    }, TEST_MS)
 
     it("nothing listening at the registered URL", async () => {
       const service = fakeService()
       service.stop()
       expectPlain(await wakeInto(register(entry(service.url))))
-    })
+    }, TEST_MS)
 
-    it("values it cannot read safely", async () => {
-      const service = fakeService()
-      try {
-        for (const bad of [{ password: 'has"quote' }, { pid: "123" }, { url: "file:///etc/passwd" }]) {
+    const unreadable: Array<[string, Record<string, unknown>]> = [
+      ["an escaped password", { password: 'has"quote' }],
+      ["a pid that is not a number", { pid: "123" }],
+      ["a URL that is not HTTP", { url: "file:///etc/passwd" }],
+    ]
+    for (const [name, bad] of unreadable) {
+      it(`values it cannot read safely: ${name}`, async () => {
+        const service = fakeService()
+        try {
           expectPlain(await wakeInto(register(entry(service.url, bad))))
+          expect(service.requests).toHaveLength(0)
+        } finally {
+          service.stop()
         }
-        expect(service.requests).toHaveLength(0)
-        const file = join(dir, "not-json.json")
-        writeFileSync(file, "garbage")
-        expectPlain(await wakeInto(file))
-      } finally {
-        service.stop()
-      }
-    })
+      }, TEST_MS)
+    }
+
+    it("a registration that is not JSON", async () => {
+      const file = join(dir, "not-json.json")
+      writeFileSync(file, "garbage")
+      expectPlain(await wakeInto(file))
+    }, TEST_MS)
   })
 })
