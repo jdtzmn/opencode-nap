@@ -11,6 +11,11 @@ const stop = () => { for (const child of children) child.kill("SIGTERM") }
 const interrupt = () => { interrupted = true; stop() }
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.once(signal, interrupt)
 
+// Each job runs its own server and TUIs. Eight fit a 4-vCPU Linux runner; a
+// 3-vCPU macOS runner needs fewer, or prompts and dialogs miss their limits.
+const requested = Number(process.env.NAP_E2E_JOBS)
+const concurrency = Number.isInteger(requested) && requested > 0 ? requested : 8
+
 type Job = { file: string; pattern?: string; priority: number }
 
 // Split long files without a manifest that could omit new cases:
@@ -54,7 +59,7 @@ try {
   // Start long groups first, then the single-case complements, then short files.
   jobs.sort((a, b) => a.priority - b.priority)
   const results: number[] = []
-  await Promise.all(Array.from({ length: Math.min(8, jobs.length) }, async () => {
+  await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length) }, async () => {
     while (jobs.length && !interrupted) results.push(await run(jobs.shift()!))
   }))
   process.exitCode = interrupted ? 130 : results.some(code => code !== 0) ? 1 : 0
