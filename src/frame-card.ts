@@ -51,20 +51,20 @@ function framePlacements(frame: Frame, palette: Palette): Placement[] {
   return placements
 }
 
-// A crescent moon among stars, with a z or two. Half blocks are square pixels.
+// A crescent moon among stars, with z's rising from the end of the title. Half blocks are square pixels.
 const SCENE = [
-  " ·      *          · ",
-  "  ▄▄██▀▀      *      ",
-  " ▄██▄      ·        z",
-  " ███            + Z  ",
-  " ▀██▀   ·            ",
-  "  ▀▀██▄▄     *   ·   ",
+  " ·      *      ·     +     ·   ",
+  "  ▄▄██▀▀     *     ·     ·    Z",
+  " ▄██      ·     +     *      · ",
+  " ███   +     ·      ·       z  ",
+  " ▀██  ·    *      ·     +      ",
+  "  ▀▀██▄▄    *     ·      z   · ",
 ]
 const STARS = /^[·*+]$/u
 
 // Stars beside the scene: one in each run of SPACING cells, nudged by a fixed hash short of its last cell so no two touch, and every nap shows the same sky.
 const STAR_CHARS = ["·", "·", "·", "*", "+"]
-const SPACING = 6
+const SPACING = 4
 function star(row: number, col: number): string {
   const hash = (cell: number) => {
     const mixed = Math.imul(row + 1, 0x9e3779b1) ^ Math.imul(cell + 1, 0x85ebca6b)
@@ -74,8 +74,8 @@ function star(row: number, col: number): string {
   const shifted = col + row * 3
   const run = Math.floor(shifted / SPACING)
   const chosen = hash(run)
-  // About one run in four is left dark.
-  if (chosen % 4 === 0 || shifted % SPACING !== (chosen >>> 4) % (SPACING - 1)) return " "
+  // About one run in six is left dark.
+  if (chosen % 6 === 0 || shifted % SPACING !== (chosen >>> 4) % (SPACING - 1)) return " "
   return STAR_CHARS[(chosen >>> 8) % STAR_CHARS.length]
 }
 // Blank cells kept between the scene and the stars beside it.
@@ -109,7 +109,7 @@ function dialogLines(room: number, palette: Palette, withScene: boolean): Span[]
   const message = textWidth(joined) <= room ? [joined, NAP_DETAIL] : [...NAP_MESSAGE, NAP_DETAIL]
   const width = Math.max(textWidth(TITLE), ...message.map(textWidth))
   return [
-    ...(withScene ? [...sceneLines(palette, width), []] : []),
+    ...(withScene ? [...sceneLines(palette, width), [], []] : []),
     [{ text: TITLE, style: { fg: palette.text, bold: true } }],
     [],
     ...message.map(text => [{ text, style: { fg: palette.muted } }]),
