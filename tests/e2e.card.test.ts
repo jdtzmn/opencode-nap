@@ -3,7 +3,7 @@ import { plainCard } from "../src/card.js"
 import { FRAME_CARD_BUDGET } from "../src/frame-card.js"
 import { buildStubExec } from "../src/stub.js"
 import {
-  cleanup, cliVersion, createScratch, createSession, e2eEnabled, startCommand, startServer, startTuiWith, stopTuis, type Scratch,
+  callApi, cleanup, cliVersion, createScratch, createSession, e2eEnabled, startCommand, startServer, startTuiWith, stopTuis, type Scratch,
 } from "./e2e/harness.js"
 import { NapRun, SPACE, stripEscapesSince, waitUntil, Watch } from "./e2e/nap-run.js"
 import { processTree } from "./e2e/processes.js"
@@ -38,6 +38,27 @@ describe.skipIf(!e2eEnabled)(`OpenCode ${cliVersion}: the nap card`, () => {
   afterEach(stopTuis, 60_000)
 
   afterAll(cleanup, 60_000)
+
+  it("replays the live terminal title after leaving the alternate screen for a nap", async () => {
+    const watch = await Watch.configure(scratch, "title", { idleMinutes: 5 / 60 })
+    const title = "Fix the flaky test"
+    const created = await callApi(scratch, server.url, "POST", "/api/session", { title })
+    const tui = await startTuiWith(scratch, "title", ["--server", server.url, "-s", created.data.id, scratch.project])
+    const run = new NapRun(tui, watch)
+    // eslint-disable-next-line no-control-regex -- OSC titles are framed by terminal control characters.
+    const titleSequence = /\x1b\](?:0|2);([^\x07\x1b]*)(?:\x07|\x1b\\)/g
+    const lastTitle = (text: string) => [...text.matchAll(titleSequence)].at(-1)?.[1]
+    await run.waitForWatching(1)
+    await waitUntil(() => lastTitle(tui.output()) === `OC | ${title}` ? true : undefined, 4_000, "OpenCode's session title")
+    const custom = "Review  café — 100% $HOME"
+    await watch.ask("title", custom)
+    await run.waitForNap(NAP_TIMEOUT_MS)
+
+    const output = tui.output()
+    const nap = output.lastIndexOf("\x1b[?1049l")
+    expect(lastTitle(output.slice(0, nap))).toBe(custom)
+    expect(lastTitle(output.slice(nap))).toBe(custom)
+  }, 60_000)
 
   it("shows the last frame under the nap dialog and costs the napping shell no memory", async () => {
     const watch = await Watch.configure(scratch, "card", napOptions)
