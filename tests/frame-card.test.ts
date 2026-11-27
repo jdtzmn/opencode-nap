@@ -66,11 +66,12 @@ describe("frameCard", () => {
       const shown = playCard(frameCard(frameOf(80, height), defaultPalette) ?? "", 80, height)
       return shown.cells.map((_, row) => shown.text(row).trim())
     }
+    const has = (rows: string[]) => rows.findIndex(row => row.includes(moonRow))
     const tall = rowsOf(24)
-    expect(tall.indexOf(moonRow)).toBeGreaterThan(0)
-    expect(tall.indexOf(moonRow)).toBeLessThan(tall.indexOf("OpenCode is sleeping"))
-    expect(rowsOf(12)).not.toContain(moonRow)
-    expect(rowsOf(13)).toContain(moonRow)
+    expect(has(tall)).toBeGreaterThan(0)
+    expect(has(tall)).toBeLessThan(tall.indexOf("OpenCode is sleeping"))
+    expect(has(rowsOf(12))).toBe(-1)
+    expect(has(rowsOf(13))).toBeGreaterThan(0)
     expect(rowsOf(11)).toContain("OpenCode is sleeping")
   })
 

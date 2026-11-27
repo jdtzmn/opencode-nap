@@ -62,11 +62,38 @@ const SCENE = [
 ]
 const STARS = /^[·*+]$/u
 
-/** The scene's rows: stars muted, the moon and the z's in the text colour. */
-function sceneLines(palette: Palette): Span[][] {
-  return SCENE.map(row => {
+// Stars beside the scene: one in each run of SPACING cells, nudged by a fixed hash short of its last cell so no two touch, and every nap shows the same sky.
+const STAR_CHARS = ["·", "·", "·", "*", "+"]
+const SPACING = 6
+function star(row: number, col: number): string {
+  const hash = (cell: number) => {
+    const mixed = Math.imul(row + 1, 0x9e3779b1) ^ Math.imul(cell + 1, 0x85ebca6b)
+    return Math.imul(mixed ^ (mixed >>> 15), 0x2c1b3c6d) >>> 0
+  }
+  // Rows are staggered so the runs do not line up in columns.
+  const shifted = col + row * 3
+  const run = Math.floor(shifted / SPACING)
+  const chosen = hash(run)
+  // About one run in four is left dark.
+  if (chosen % 4 === 0 || shifted % SPACING !== (chosen >>> 4) % (SPACING - 1)) return " "
+  return STAR_CHARS[(chosen >>> 8) % STAR_CHARS.length]
+}
+// Blank cells kept between the scene and the stars beside it.
+const STAR_GAP = 2
+
+/** The scene centred in `width` cells with stars out to its edges: stars muted, the moon and the z's in the text colour. */
+function sceneLines(palette: Palette, width: number): Span[][] {
+  const sceneWidth = textWidth(SCENE[0])
+  const left = Math.max(0, Math.floor((width - sceneWidth) / 2))
+  const right = Math.max(0, width - sceneWidth - left)
+  const sky = (row: number, from: number, length: number) =>
+    Array.from({ length }, (_, index) => {
+      const col = from + index
+      return col >= left - STAR_GAP && col < left + sceneWidth + STAR_GAP ? " " : star(row, col)
+    }).join("")
+  return SCENE.map((scene, row) => {
     const spans: Span[] = []
-    for (const char of row) {
+    for (const char of sky(row, 0, left) + scene + sky(row, left + sceneWidth, right)) {
       const fg = char === " " ? undefined : STARS.test(char) ? palette.muted : palette.text
       const last = spans[spans.length - 1]
       if (last && (char === " " || last.style?.fg === fg)) last.text += char
@@ -76,12 +103,13 @@ function sceneLines(palette: Palette): Span[][] {
   })
 }
 
-// The dialog's lines: the scene where it fits, then the title and the message.
+// The dialog's lines: the scene where it fits, as wide as the text, then the title and the message.
 function dialogLines(room: number, palette: Palette, withScene: boolean): Span[][] {
   const joined = NAP_MESSAGE.join(" ")
   const message = textWidth(joined) <= room ? [joined, NAP_DETAIL] : [...NAP_MESSAGE, NAP_DETAIL]
+  const width = Math.max(textWidth(TITLE), ...message.map(textWidth))
   return [
-    ...(withScene ? [...sceneLines(palette), []] : []),
+    ...(withScene ? [...sceneLines(palette, width), []] : []),
     [{ text: TITLE, style: { fg: palette.text, bold: true } }],
     [],
     ...message.map(text => [{ text, style: { fg: palette.muted } }]),
