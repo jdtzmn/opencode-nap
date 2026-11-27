@@ -51,11 +51,12 @@ describe("frameCard", () => {
     expect(text.slice(title, title + 4)).toEqual([
       "OpenCode is sleeping", "", "Napping to save memory. Press any key or click to wake.", "Sessions keep running in the background.",
     ])
-    // Rows 9 to 14 of 24, columns 8 to 70 of 80.
-    expect(grid.cells[9][8].bg).not.toBe(rgb(base))
-    expect(grid.cells[14][70].bg).toBe(grid.cells[9][8].bg)
-    expect(grid.cells[9][7].bg).toBe(rgb(base))
-    expect(grid.cells[15][8].bg).toBe(rgb(base))
+    // Rows 1 to 6 of 24, columns 8 to 70 of 80.
+    expect(grid.cells[1][8].bg).not.toBe(rgb(base))
+    expect(grid.cells[6][70].bg).toBe(grid.cells[1][8].bg)
+    expect(grid.cells[1][7].bg).toBe(rgb(base))
+    expect(grid.cells[0][8].bg).toBe(rgb(base))
+    expect(grid.cells[7][8].bg).toBe(rgb(base))
     expect(grid.cursorVisible).toBe(false)
   })
 

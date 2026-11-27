@@ -50,7 +50,7 @@ function framePlacements(frame: Frame, palette: Palette): Placement[] {
   return placements
 }
 
-/** The centred dialog: title, then the message, on a background lifted a little from the theme's. Undefined when it does not fit. */
+/** The dialog, centred near the top so it covers little of the frame: title, then the message, on a background lifted a little from the theme's. Undefined when it does not fit. */
 function dialogPlacements(width: number, height: number, palette: Palette): Placement[] | undefined {
   const room = width - 2 * MARGIN - 2 * PAD_X
   const joined = NAP_MESSAGE.join(" ")
@@ -65,7 +65,8 @@ function dialogPlacements(width: number, height: number, palette: Palette): Plac
   const boxHeight = lines.length + 2 * PAD_Y
   if (inner > room || boxHeight > height) return undefined
   const left = Math.floor((width - boxWidth) / 2)
-  const top = Math.floor((height - boxHeight) / 2)
+  // One row down from the top, or flush with it when the screen has no row to spare.
+  const top = Math.min(1, height - boxHeight)
   const bg = tint(palette.background, palette.text, DIALOG_LIFT)
   return Array.from({ length: boxHeight }, (_, index) => {
     const line = lines[index - PAD_Y]
@@ -85,7 +86,7 @@ function dialogPlacements(width: number, height: number, palette: Palette): Plac
 
 /**
  * The nap screen from the TUI's last frame: the frame dimmed toward the
- * theme's background with the nap dialog centred over it. Undefined when the
+ * theme's background with the nap dialog near its top. Undefined when the
  * dialog does not fit or the screen is over the budget.
  */
 export function frameCard(frame: Frame, palette: Palette): string | undefined {
