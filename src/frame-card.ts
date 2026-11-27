@@ -54,11 +54,11 @@ function framePlacements(frame: Frame, palette: Palette): Placement[] {
 // A crescent moon among stars, with z's rising from the end of the title. Half blocks are square pixels.
 const SCENE = [
   " ·      *      ·     +     ·   ",
-  "     ▄▄██▀▀  *     ·     ·    Z",
-  " ·  ▄██   ·     +     *      · ",
-  "    ███      ·      ·       z  ",
-  "*   ▀██    *      ·     +      ",
-  "     ▀▀██▄▄ *     ·      z   · ",
+  "       ▄▄██▀▀      ·     ·    Z",
+  " ·    ▄██ ·     +     *      · ",
+  "      ███    ·      ·       z  ",
+  "*     ▀██  *      ·     +      ",
+  "       ▀▀██▄▄     ·      z   · ",
 ]
 const STARS = /^[·*+]$/u
 

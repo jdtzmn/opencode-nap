@@ -61,7 +61,7 @@ describe("frameCard", () => {
   })
 
   it("puts the moon above the title, and leaves it out on a short screen", () => {
-    const moonRow = "███      ·      ·       z"
+    const moonRow = "███    ·      ·       z"
     const rowsOf = (height: number) => {
       const shown = playCard(frameCard(frameOf(80, height), defaultPalette) ?? "", 80, height)
       return shown.cells.map((_, row) => shown.text(row).trim())
