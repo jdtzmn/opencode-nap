@@ -1,8 +1,9 @@
+import { lineWidth, logoLines } from "./card-logo.js"
 import { channel, tint, type Color } from "./color.js"
 import type { Frame } from "./frame.js"
 import { NAP_DETAIL, NAP_MESSAGE } from "./message.js"
 import type { Palette } from "./palette.js"
-import { paint, type Placement, type Style } from "./screen.js"
+import { paint, type Placement, type Span, type Style } from "./screen.js"
 import { textWidth } from "./text.js"
 
 /** How far each colour of the frame moves toward the theme's background. */
@@ -50,38 +51,54 @@ function framePlacements(frame: Frame, palette: Palette): Placement[] {
   return placements
 }
 
-/** The dialog, centred near the top so it covers little of the frame: title, then the message, on a background lifted a little from the theme's. Undefined when it does not fit. */
-function dialogPlacements(width: number, height: number, palette: Palette): Placement[] | undefined {
-  const room = width - 2 * MARGIN - 2 * PAD_X
+// The dialog's lines: the logo where it fits, then the title and the message.
+function dialogLines(room: number, height: number, palette: Palette, withLogo: boolean): Span[][] {
   const joined = NAP_MESSAGE.join(" ")
   const message = textWidth(joined) <= room ? [joined, NAP_DETAIL] : [...NAP_MESSAGE, NAP_DETAIL]
-  const lines: Array<{ text: string; style: Style }> = [
-    { text: TITLE, style: { fg: palette.text, bold: true } },
-    { text: "", style: {} },
-    ...message.map(text => ({ text, style: { fg: palette.muted } })),
+  const logo = withLogo ? logoLines(room, height, palette) : []
+  return [
+    ...(logo.length ? [...logo, []] : []),
+    [{ text: TITLE, style: { fg: palette.text, bold: true } }],
+    [],
+    ...message.map(text => [{ text, style: { fg: palette.muted } }]),
   ]
-  const inner = Math.max(...lines.map(line => textWidth(line.text)))
-  const boxWidth = inner + 2 * PAD_X
-  const boxHeight = lines.length + 2 * PAD_Y
-  if (inner > room || boxHeight > height) return undefined
-  const left = Math.floor((width - boxWidth) / 2)
-  // One row down from the top, or flush with it when the screen has no row to spare.
-  const top = Math.min(1, height - boxHeight)
+}
+
+/**
+ * The dialog, centred near the top so it covers little of the frame, on a
+ * background lifted a little from the theme's. The logo is left out when it
+ * does not fit; undefined when the rest does not either.
+ */
+function dialogPlacements(width: number, height: number, palette: Palette): Placement[] | undefined {
+  const room = width - 2 * MARGIN - 2 * PAD_X
   const bg = tint(palette.background, palette.text, DIALOG_LIFT)
-  return Array.from({ length: boxHeight }, (_, index) => {
-    const line = lines[index - PAD_Y]
-    const text = line?.text ?? ""
-    const offset = Math.floor((inner - textWidth(text)) / 2)
-    return {
-      row: top + index,
-      col: left,
-      spans: [
-        { text: " ".repeat(PAD_X + offset), style: { bg } },
-        { text, style: { ...line?.style, bg } },
-        { text: " ".repeat(PAD_X + inner - offset - textWidth(text)), style: { bg } },
-      ],
-    }
-  })
+  // The logo's shadow is tinted from the background it sits on.
+  const lifted = { ...palette, background: bg }
+  for (const withLogo of [true, false]) {
+    const lines = dialogLines(room, height, lifted, withLogo)
+    const inner = Math.max(...lines.map(lineWidth))
+    const boxWidth = inner + 2 * PAD_X
+    const boxHeight = lines.length + 2 * PAD_Y
+    if (inner > room || boxHeight > height) continue
+    const left = Math.floor((width - boxWidth) / 2)
+    // One row down from the top, or flush with it when the screen has no row to spare.
+    const top = Math.min(1, height - boxHeight)
+    return Array.from({ length: boxHeight }, (_, index) => {
+      const spans = lines[index - PAD_Y] ?? []
+      const used = lineWidth(spans)
+      const offset = Math.floor((inner - used) / 2)
+      return {
+        row: top + index,
+        col: left,
+        spans: [
+          { text: " ".repeat(PAD_X + offset), style: { bg } },
+          ...spans.map(span => ({ text: span.text, style: { bg, ...span.style } })),
+          { text: " ".repeat(PAD_X + inner - offset - used), style: { bg } },
+        ],
+      }
+    })
+  }
+  return undefined
 }
 
 /**
