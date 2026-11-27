@@ -1,4 +1,4 @@
-import { lineWidth, logoLines } from "./card-logo.js"
+import { lineWidth } from "./card-logo.js"
 import { channel, tint, type Color } from "./color.js"
 import type { Frame } from "./frame.js"
 import { NAP_DETAIL, NAP_MESSAGE } from "./message.js"
@@ -51,13 +51,37 @@ function framePlacements(frame: Frame, palette: Palette): Placement[] {
   return placements
 }
 
-// The dialog's lines: the logo where it fits, then the title and the message.
-function dialogLines(room: number, height: number, palette: Palette, withLogo: boolean): Span[][] {
+// A crescent moon among stars, with a z or two. Half blocks are square pixels.
+const SCENE = [
+  " ·      *          · ",
+  "  ▄▄██▀▀      *      ",
+  " ▄██▄      ·        z",
+  " ███            + Z  ",
+  " ▀██▀   ·            ",
+  "  ▀▀██▄▄     *   ·   ",
+]
+const STARS = /^[·*+]$/u
+
+/** The scene's rows: stars muted, the moon and the z's in the text colour. */
+function sceneLines(palette: Palette): Span[][] {
+  return SCENE.map(row => {
+    const spans: Span[] = []
+    for (const char of row) {
+      const fg = char === " " ? undefined : STARS.test(char) ? palette.muted : palette.text
+      const last = spans[spans.length - 1]
+      if (last && (char === " " || last.style?.fg === fg)) last.text += char
+      else spans.push({ text: char, style: { fg } })
+    }
+    return spans
+  })
+}
+
+// The dialog's lines: the scene where it fits, then the title and the message.
+function dialogLines(room: number, palette: Palette, withScene: boolean): Span[][] {
   const joined = NAP_MESSAGE.join(" ")
   const message = textWidth(joined) <= room ? [joined, NAP_DETAIL] : [...NAP_MESSAGE, NAP_DETAIL]
-  const logo = withLogo ? logoLines(room, height, palette) : []
   return [
-    ...(logo.length ? [...logo, []] : []),
+    ...(withScene ? [...sceneLines(palette), []] : []),
     [{ text: TITLE, style: { fg: palette.text, bold: true } }],
     [],
     ...message.map(text => [{ text, style: { fg: palette.muted } }]),
@@ -66,16 +90,14 @@ function dialogLines(room: number, height: number, palette: Palette, withLogo: b
 
 /**
  * The dialog, centred near the top so it covers little of the frame, on a
- * background lifted a little from the theme's. The logo is left out when it
+ * background lifted a little from the theme's. The scene is left out when it
  * does not fit; undefined when the rest does not either.
  */
 function dialogPlacements(width: number, height: number, palette: Palette): Placement[] | undefined {
   const room = width - 2 * MARGIN - 2 * PAD_X
   const bg = tint(palette.background, palette.text, DIALOG_LIFT)
-  // The logo's shadow is tinted from the background it sits on.
-  const lifted = { ...palette, background: bg }
-  for (const withLogo of [true, false]) {
-    const lines = dialogLines(room, height, lifted, withLogo)
+  for (const withScene of [true, false]) {
+    const lines = dialogLines(room, palette, withScene)
     const inner = Math.max(...lines.map(lineWidth))
     const boxWidth = inner + 2 * PAD_X
     const boxHeight = lines.length + 2 * PAD_Y

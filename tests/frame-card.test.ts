@@ -51,25 +51,26 @@ describe("frameCard", () => {
     expect(text.slice(title, title + 4)).toEqual([
       "OpenCode is sleeping", "", "Napping to save memory. Press any key or click to wake.", "Sessions keep running in the background.",
     ])
-    // Rows 1 to 11 of 24, columns 8 to 70 of 80: the logo, the title and the message.
+    // Rows 1 to 13 of 24, columns 8 to 70 of 80: the scene, the title and the message.
     expect(grid.cells[1][8].bg).not.toBe(rgb(base))
-    expect(grid.cells[11][70].bg).toBe(grid.cells[1][8].bg)
+    expect(grid.cells[13][70].bg).toBe(grid.cells[1][8].bg)
     expect(grid.cells[1][7].bg).toBe(rgb(base))
     expect(grid.cells[0][8].bg).toBe(rgb(base))
-    expect(grid.cells[12][8].bg).toBe(rgb(base))
+    expect(grid.cells[14][8].bg).toBe(rgb(base))
     expect(grid.cursorVisible).toBe(false)
   })
 
-  it("puts the logo above the title, and leaves it out on a short screen", () => {
-    const logoRow = "█▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█"
+  it("puts the moon above the title, and leaves it out on a short screen", () => {
+    const moonRow = "███            + Z"
     const rowsOf = (height: number) => {
       const shown = playCard(frameCard(frameOf(80, height), defaultPalette) ?? "", 80, height)
       return shown.cells.map((_, row) => shown.text(row).trim())
     }
     const tall = rowsOf(24)
-    expect(tall.indexOf(logoRow)).toBeGreaterThan(0)
-    expect(tall.indexOf(logoRow)).toBeLessThan(tall.indexOf("OpenCode is sleeping"))
-    expect(rowsOf(11)).not.toContain(logoRow)
+    expect(tall.indexOf(moonRow)).toBeGreaterThan(0)
+    expect(tall.indexOf(moonRow)).toBeLessThan(tall.indexOf("OpenCode is sleeping"))
+    expect(rowsOf(12)).not.toContain(moonRow)
+    expect(rowsOf(13)).toContain(moonRow)
     expect(rowsOf(11)).toContain("OpenCode is sleeping")
   })
 
