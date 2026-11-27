@@ -51,12 +51,28 @@ describe("frameCard", () => {
     expect(text.slice(title, title + 4)).toEqual([
       "OpenCode is sleeping", "", "Napping to save memory. Press any key or click to wake.", "Sessions keep running in the background.",
     ])
-    // Rows 9 to 14 of 24, columns 8 to 70 of 80.
-    expect(grid.cells[9][8].bg).not.toBe(rgb(base))
-    expect(grid.cells[14][70].bg).toBe(grid.cells[9][8].bg)
-    expect(grid.cells[9][7].bg).toBe(rgb(base))
+    // Rows 1 to 14 of 24, columns 8 to 70 of 80: the scene, the title and the message.
+    expect(grid.cells[1][8].bg).not.toBe(rgb(base))
+    expect(grid.cells[14][70].bg).toBe(grid.cells[1][8].bg)
+    expect(grid.cells[1][7].bg).toBe(rgb(base))
+    expect(grid.cells[0][8].bg).toBe(rgb(base))
     expect(grid.cells[15][8].bg).toBe(rgb(base))
     expect(grid.cursorVisible).toBe(false)
+  })
+
+  it("puts the moon above the title, and leaves it out on a short screen", () => {
+    const moonRow = "███    ·      ·       z"
+    const rowsOf = (height: number) => {
+      const shown = playCard(frameCard(frameOf(80, height), defaultPalette) ?? "", 80, height)
+      return shown.cells.map((_, row) => shown.text(row).trim())
+    }
+    const has = (rows: string[]) => rows.findIndex(row => row.includes(moonRow))
+    const tall = rowsOf(24)
+    expect(has(tall)).toBeGreaterThan(0)
+    expect(has(tall)).toBeLessThan(tall.indexOf("OpenCode is sleeping"))
+    expect(has(rowsOf(13))).toBe(-1)
+    expect(has(rowsOf(14))).toBeGreaterThan(0)
+    expect(rowsOf(11)).toContain("OpenCode is sleeping")
   })
 
   it("splits the message on a narrow screen and gives up when the dialog cannot fit", () => {
